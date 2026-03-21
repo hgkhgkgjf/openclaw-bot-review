@@ -781,9 +781,24 @@ export default function Home() {
           </div>
           {(() => {
             const currentData = allStats[statsRange];
-            const totalInput = currentData.reduce((s, d) => s + d.inputTokens, 0);
-            const totalOutput = currentData.reduce((s, d) => s + d.outputTokens, 0);
-            const totalMsgs = currentData.reduce((s, d) => s + d.messageCount, 0);
+            // Show current period only (today/this week/this month)
+            const now = new Date();
+            const getCurrentPeriodKey = () => {
+              if (statsRange === "daily") return now.toISOString().slice(0, 10);
+              if (statsRange === "weekly") {
+                const day = now.getUTCDay();
+                const mondayOffset = day === 0 ? -6 : 1 - day;
+                const monday = new Date(now.getTime() + mondayOffset * 86400000);
+                return monday.toISOString().slice(0, 10);
+              }
+              return now.toISOString().slice(0, 7); // monthly
+            };
+            const periodKey = getCurrentPeriodKey();
+            const latestEntry = currentData.length > 0 ? currentData[currentData.length - 1] : null;
+            const currentEntry = latestEntry?.date === periodKey ? latestEntry : null;
+            const totalInput = currentEntry?.inputTokens ?? 0;
+            const totalOutput = currentEntry?.outputTokens ?? 0;
+            const totalMsgs = currentEntry?.messageCount ?? 0;
             return (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
