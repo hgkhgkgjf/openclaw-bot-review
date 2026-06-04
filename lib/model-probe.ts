@@ -192,9 +192,10 @@ async function probeModelDirect(params: ProbeModelParams): Promise<DirectProbeRe
   if (!providerCfg?.baseUrl || !providerCfg.api || !providerCfg.apiKey) return null;
 
   const timeoutMs = params.timeoutMs ?? DEFAULT_MODEL_PROBE_TIMEOUT_MS;
-  // Kimi providers require temperature=1
+  // Kimi and MiniMax providers require temperature > 0
   const isKimiProvider = params.providerId === "kimi-coding" || params.providerId === "moonshot";
-  const temperature = isKimiProvider ? 1 : 0;
+  const isMiniMaxProvider = params.providerId.toLowerCase().startsWith("minimax");
+  const temperature = (isKimiProvider || isMiniMaxProvider) ? 1 : 0;
 
   const headers: Record<string, string> = {
     "content-type": "application/json",

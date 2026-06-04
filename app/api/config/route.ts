@@ -4,6 +4,7 @@ import path from "path";
 import { getConfigCache, setConfigCache } from "@/lib/config-cache";
 import { OPENCLAW_CONFIG_PATH, OPENCLAW_HOME } from "@/lib/openclaw-paths";
 import { shouldHidePlatformChannel } from "@/lib/platforms";
+import { enrichModelMeta } from "@/lib/known-providers";
 
 // 配置文件路径：优先使用 OPENCLAW_HOME 环境变量，否则默认 ~/.openclaw
 const CONFIG_PATH = OPENCLAW_CONFIG_PATH;
@@ -445,7 +446,7 @@ export async function GET() {
     // 提取模型 providers
     let providers = Object.entries(config.models?.providers || {}).map(
       ([providerId, provider]: [string, any]) => {
-        const models = (provider.models || []).map((m: any) => ({
+        const models = (provider.models || []).map((m: any) => enrichModelMeta(providerId, {
           id: m.id,
           name: m.name || m.id,
           contextWindow: m.contextWindow,
@@ -523,14 +524,14 @@ export async function GET() {
       for (const m of inferredModels) {
         const exists = target.models.find((x: any) => x.id === m.id);
         if (!exists) {
-          target.models.push({
+          target.models.push(enrichModelMeta(providerId, {
             id: m.id,
             name: m.name || m.id,
             contextWindow: undefined,
             maxTokens: undefined,
             reasoning: undefined,
             input: undefined,
-          });
+          }));
         } else if (!exists.name) {
           exists.name = m.name || exists.id;
         }

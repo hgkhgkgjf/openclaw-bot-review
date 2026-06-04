@@ -97,6 +97,34 @@ OPENCLAW_ALLOW_UNAUTHENTICATED_LOCAL_OPERATOR_UI=true npm run start
 
 Do not enable unauthenticated local mode on a dashboard exposed through a tunnel, shared host, reverse proxy, or public network.
 
+## Supported Providers
+
+The dashboard includes built-in metadata for the following LLM providers, enabling automatic enrichment of model details (context window, max output tokens, etc.) when they appear in your OpenClaw config:
+
+| Provider | Models | API Type | Base URL |
+|----------|--------|----------|----------|
+| **[MiniMax](https://platform.minimax.io)** | `MiniMax-M2.7`, `MiniMax-M2.7-highspeed` | OpenAI-compatible | `https://api.minimax.io/v1` |
+
+To use MiniMax with OpenClaw, add the following to your `models.json`:
+
+```json
+{
+  "providers": {
+    "minimax": {
+      "baseUrl": "https://api.minimax.io/v1",
+      "api": "openai-completions",
+      "apiKey": "your-minimax-api-key",
+      "models": [
+        { "id": "MiniMax-M2.7", "name": "MiniMax-M2.7" },
+        { "id": "MiniMax-M2.7-highspeed", "name": "MiniMax-M2.7-highspeed" }
+      ]
+    }
+  }
+}
+```
+
+For more details, see the [MiniMax API Reference](https://platform.minimax.io/docs/api-reference/text-openai-api).
+
 ## Docker Deployment
 
 You can also deploy the dashboard using Docker:
@@ -192,6 +220,34 @@ npm run start
 OPENCLAW_HOME=/opt/openclaw 
 npm run start
 ```
+
+## 支持的 Provider
+
+仪表盘内置以下 LLM Provider 的模型元数据，当它们出现在 OpenClaw 配置中时，会自动填充上下文窗口、最大输出等详细信息：
+
+| Provider | 模型 | API 类型 | Base URL |
+|----------|------|----------|----------|
+| **[MiniMax](https://platform.minimax.io)** | `MiniMax-M2.7`, `MiniMax-M2.7-highspeed` | OpenAI 兼容 | `https://api.minimax.io/v1` |
+
+在 `models.json` 中添加 MiniMax 配置：
+
+```json
+{
+  "providers": {
+    "minimax": {
+      "baseUrl": "https://api.minimax.io/v1",
+      "api": "openai-completions",
+      "apiKey": "your-minimax-api-key",
+      "models": [
+        { "id": "MiniMax-M2.7", "name": "MiniMax-M2.7" },
+        { "id": "MiniMax-M2.7-highspeed", "name": "MiniMax-M2.7-highspeed" }
+      ]
+    }
+  }
+}
+```
+
+更多信息请参考 [MiniMax API 文档](https://platform.minimax.io/docs/api-reference/text-openai-api)。
 
 ## 作者联系方式（contact）
 小红书：[主页](https://xhslink.com/m/AsJKWgEBt1I) 
