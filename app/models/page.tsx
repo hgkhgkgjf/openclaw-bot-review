@@ -232,7 +232,7 @@ export default function ModelsPage() {
           </span>
         </div>
         {data.defaults.fallbacks.length > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-[var(--text-muted)]">{t("models.fallbackModels")}:</span>
             {data.defaults.fallbacks.map((f, i) => (
               <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-yellow-500/20 text-yellow-300 border-yellow-500/30">
