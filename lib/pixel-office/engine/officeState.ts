@@ -13,6 +13,7 @@ import {
   CHARACTER_HIT_HEIGHT,
 } from '../constants'
 import type { Character, Seat, FurnitureInstance, TileType as TileTypeVal, OfficeLayout, PlacedFurniture } from '../types'
+import { FurnitureType } from '../types'
 import { createCharacter, updateCharacter } from './characters'
 import { CHARACTER_PALETTES, getAvailableCharacterVariantCount } from '../sprites/spriteData'
 import { matrixEffectSeeds } from './matrixEffect'
@@ -86,7 +87,7 @@ const SRE_BLACKWORDS_ZH_TW = [
   '先查日誌紀錄',
   '先重現',
   '限流先開',
-  '還好',
+  '檢查gateway',
   '降載執行',
   '先做降級',
   '先擴容',
@@ -368,12 +369,11 @@ const GATEWAY_SRE_LABEL = '值班SRE'
 const GATEWAY_SRE_STANDBY_COL = 2
 const GATEWAY_SRE_STANDBY_ROW = 14
 const GATEWAY_SRE_RESCUE_CANDIDATES = [
-  // Break-area server sits at left wall (around col 1~2, row 12~13).
-  // "Front of server" means the lower edge of the rack in this top-down view.
-  { col: 2, row: 14 },
-  { col: 1, row: 14 },
-  { col: 3, row: 13 },
-  { col: 3, row: 12 },
+  // Rescue point: right wall of lounge area.
+  { col: 18, row: 14 },
+  { col: 18, row: 13 },
+  { col: 17, row: 14 },
+  { col: 17, row: 13 },
 ] as const
 
 export type GatewaySreState = 'unknown' | 'healthy' | 'degraded' | 'down'
@@ -384,6 +384,23 @@ export interface GatewaySreInfo {
   error: string | null
   responseMs: number | null
   checkedAt: number | null
+}
+
+interface GreetingSequence {
+  childId: number
+  parentId: number
+  childTarget: { col: number; row: number } | null
+  /** Where the parent walks to when they are NOT at their seat (midpoint meeting) */
+  parentTarget: { col: number; row: number } | null
+  /** Tile to wait at when MainAgent is busy with another greeter */
+  waitTarget: { col: number; row: number } | null
+  phase: 'waiting' | 'walk' | 'pause' | 'parent_smile' | 'child_smile' | 'final_pause' | 'complete'
+  timer: number
+  isExit: boolean
+  /** Tile to walk back to after farewell, before despawning */
+  exitReturnPos: { col: number; row: number } | null
+  /** True when child arrived at greeting tile but MainAgent wasn't physically present */
+  parentAbsent?: boolean
 }
 
 export class OfficeState {
@@ -417,6 +434,19 @@ export class OfficeState {
   private gatewaySreResponseMs: number | null = null
   private gatewaySreCheckedAt: number | null = null
   private locale: OfficeLocale = 'zh'
+  private activeGreetings: Map<number, GreetingSequence> = new Map()
+  /** The first regular agent added — all other agents greet this one on entry */
+  private mainAgentId: number | null = null
+  /** FIFO queue of agent IDs waiting to greet MainAgent. Only queue head walks over; others stay at seat. */
+  private greetQueue: number[] = []
+  /** Subagents lingering at seat before farewell. key=charId, value=remaining seconds */
+  private lingerSubagents: Map<number, number> = new Map()
+  /** Subagent IDs queued for farewell — when processGreetQueue starts their greeting, mark isExit=true */
+  private exitOnGreetComplete: Set<number> = new Set()
+  /** Agent IDs that were explicitly set to idle (下班) — only these should greet on next activation */
+  private explicitlyIdledAgents: Set<number> = new Set()
+  /** Stashed exit return positions for subagents waiting in greetQueue. Cleared when greeting starts. */
+  private exitReturnStash: Map<number, { col: number; row: number }> = new Map()
 
   getTempWorkerLabel(): string {
     return getTempWorkerLabel(this.locale)
@@ -709,6 +739,13 @@ export class OfficeState {
       ch.matrixEffectSeeds = matrixEffectSeeds()
     }
     this.characters.set(id, ch)
+
+    // Track first agent as MainAgent; others greet on entry
+    if (this.mainAgentId === null) {
+      this.mainAgentId = id
+    } else if (spawnAtDoor) {
+      this.tryStartGreeting(ch)
+    }
   }
 
   /** Spawn the office cat at a random walkable tile */
@@ -848,6 +885,333 @@ export class OfficeState {
     }
   }
 
+  /** Find a walkable tile adjacent to a character */
+  private findAdjacentWalkable(ch: Character): { col: number; row: number } | null {
+    const adjacents = [
+      { col: ch.tileCol - 1, row: ch.tileRow },
+      { col: ch.tileCol + 1, row: ch.tileRow },
+      { col: ch.tileCol, row: ch.tileRow - 1 },
+      { col: ch.tileCol, row: ch.tileRow + 1 },
+    ]
+    for (const t of adjacents) {
+      if (isWalkable(t.col, t.row, this.tileMap, this.blockedTiles)) return t
+    }
+    return null
+  }
+
+  /**
+   * Find a midpoint meeting location when MainAgent is not at their seat.
+   * Returns childTarget (where child walks) and parentTarget (where parent walks),
+   * adjacent to each other near the midpoint between the two characters.
+   */
+  private findMeetingTiles(
+    child: Character,
+    parent: Character,
+  ): { childTarget: { col: number; row: number }; parentTarget: { col: number; row: number } } | null {
+    const midCol = Math.round((child.tileCol + parent.tileCol) / 2)
+    const midRow = Math.round((child.tileRow + parent.tileRow) / 2)
+
+    // Find walkable tile closest to midpoint for the parent to walk to
+    const parentTile = this.findClosestWalkable(midCol, midRow)
+    if (!parentTile) return null
+
+    // Verify parent can reach that tile
+    const parentPath = findPath(parent.tileCol, parent.tileRow, parentTile.col, parentTile.row, this.tileMap, this.blockedTiles)
+    if (parentPath.length === 0 && !(parent.tileCol === parentTile.col && parent.tileRow === parentTile.row)) return null
+
+    // Child walks to a tile adjacent to parent's meeting tile
+    const adjacents = [
+      { col: parentTile.col - 1, row: parentTile.row },
+      { col: parentTile.col + 1, row: parentTile.row },
+      { col: parentTile.col,     row: parentTile.row - 1 },
+      { col: parentTile.col,     row: parentTile.row + 1 },
+    ]
+    for (const adj of adjacents) {
+      if (!isWalkable(adj.col, adj.row, this.tileMap, this.blockedTiles)) continue
+      const childPath = findPath(child.tileCol, child.tileRow, adj.col, adj.row, this.tileMap, this.blockedTiles)
+      if (childPath.length > 0) return { childTarget: adj, parentTarget: parentTile }
+    }
+    return null
+  }
+
+  /** Returns true if MainAgent is currently in an active greeting sequence */
+  private isMainAgentBusy(): boolean {
+    if (this.mainAgentId === null) return false
+    for (const g of this.activeGreetings.values()) {
+      if (g.parentId === this.mainAgentId) return true
+    }
+    return false
+  }
+
+  /**
+   * Queue `ch` to greet MainAgent. If MainAgent is free and queue is empty,
+   * starts the greeting immediately. Otherwise, adds to FIFO queue and the agent
+   * stays at their seat until it's their turn.
+   * No-op if: ch IS MainAgent, already in queue/greeting, MainAgent not found.
+   */
+  private tryStartGreeting(ch: Character): void {
+    if (this.mainAgentId === null || ch.id === this.mainAgentId || ch.isSystemRole) return
+    if (this.activeGreetings.has(ch.id)) return
+    if (this.greetQueue.includes(ch.id)) return
+    const mainCh = this.characters.get(this.mainAgentId)
+    if (!mainCh || mainCh.matrixEffect === 'despawn') return
+
+    this.greetQueue.push(ch.id)
+    this.processGreetQueue()
+  }
+
+  /** Dequeue the next agent and start their greeting walk if MainAgent is free. */
+  private processGreetQueue(): void {
+    if (this.isMainAgentBusy()) return
+    // Find first queued agent that still exists and isn't already greeting
+    while (this.greetQueue.length > 0) {
+      const nextId = this.greetQueue[0]
+      const ch = this.characters.get(nextId)
+      if (!ch || this.activeGreetings.has(nextId)) {
+        this.greetQueue.shift()
+        continue
+      }
+      const mainCh = this.characters.get(this.mainAgentId!)
+      if (!mainCh || mainCh.matrixEffect === 'despawn') {
+        this.greetQueue.length = 0
+        return
+      }
+      // Determine meeting point based on whether MainAgent is at their seat
+      let greetTile: { col: number; row: number } | null
+      let parentTarget: { col: number; row: number } | null = null
+
+      if (mainCh.state === CharacterState.TYPE) {
+        // MainAgent is at seat — child walks to adjacent tile, parent stays
+        greetTile = this.findAdjacentWalkable(mainCh)
+      } else {
+        // MainAgent is not at seat — meet halfway
+        const meeting = this.findMeetingTiles(ch, mainCh)
+        if (meeting) {
+          greetTile = meeting.childTarget
+          parentTarget = meeting.parentTarget
+        } else {
+          // Fallback: walk to wherever MainAgent currently is
+          greetTile = this.findAdjacentWalkable(mainCh)
+        }
+      }
+
+      if (!greetTile) { this.greetQueue.shift(); continue }
+      const greetPath = findPath(ch.tileCol, ch.tileRow, greetTile.col, greetTile.row, this.tileMap, this.blockedTiles)
+      if (greetPath.length === 0) { this.greetQueue.shift(); continue }
+      this.greetQueue.shift()
+      ch.path = greetPath
+      ch.state = CharacterState.WALK
+      ch.moveProgress = 0
+      ch.greetLocked = true
+
+      // If parent needs to walk to meeting point, lock and start them moving now
+      if (parentTarget) {
+        const parentPath = findPath(mainCh.tileCol, mainCh.tileRow, parentTarget.col, parentTarget.row, this.tileMap, this.blockedTiles)
+        if (parentPath.length > 0) {
+          mainCh.greetLocked = true
+          mainCh.path = parentPath
+          mainCh.state = CharacterState.WALK
+          mainCh.moveProgress = 0
+        } else {
+          parentTarget = null // parent already there or unreachable
+        }
+      }
+
+      const isExitGreeting = this.exitOnGreetComplete.has(ch.id)
+      if (isExitGreeting) this.exitOnGreetComplete.delete(ch.id)
+      // Recover the stashed return position for this exit greeting
+      const exitReturnPos = isExitGreeting ? (this.exitReturnStash.get(ch.id) ?? null) : null
+      if (isExitGreeting) this.exitReturnStash.delete(ch.id)
+      this.activeGreetings.set(ch.id, {
+        childId: ch.id,
+        parentId: this.mainAgentId!,
+        childTarget: greetTile,
+        parentTarget,
+        waitTarget: null,
+        phase: 'walk',
+        timer: 0,
+        isExit: isExitGreeting,
+        exitReturnPos,
+      })
+      return
+    }
+  }
+
+  /** Approximate facing direction from one tile toward another */
+  private directionToward(fromCol: number, fromRow: number, toCol: number, toRow: number): Direction {
+    const dc = toCol - fromCol
+    const dr = toRow - fromRow
+    if (Math.abs(dc) >= Math.abs(dr)) return dc >= 0 ? Direction.RIGHT : Direction.LEFT
+    return dr >= 0 ? Direction.DOWN : Direction.UP
+  }
+
+  private updateGreetings(dt: number): void {
+    const completed: number[] = []
+
+    for (const [childId, seq] of this.activeGreetings) {
+      const child = this.characters.get(childId)
+      const parent = this.characters.get(seq.parentId)
+
+      if (!child || child.matrixEffect === 'despawn') {
+        completed.push(childId)
+        if (parent) parent.greetLocked = false
+        continue
+      }
+
+      switch (seq.phase) {
+        case 'walk': {
+          const target = seq.childTarget
+          if (!target) { seq.phase = 'complete'; break }
+
+          // If parent has a meeting target, keep them walking toward it
+          if (seq.parentTarget && parent) {
+            const pt = seq.parentTarget
+            const parentArrived = parent.tileCol === pt.col && parent.tileRow === pt.row
+            if (!parentArrived && parent.path.length === 0 && parent.state !== CharacterState.WALK) {
+              const repath = findPath(parent.tileCol, parent.tileRow, pt.col, pt.row, this.tileMap, this.blockedTiles)
+              if (repath.length > 0) {
+                parent.path = repath
+                parent.state = CharacterState.WALK
+                parent.moveProgress = 0
+                parent.greetLocked = true
+              }
+            }
+          }
+
+          const childArrived = child.tileCol === target.col && child.tileRow === target.row
+          const parentArrived = !seq.parentTarget || !parent ||
+            (parent.tileCol === seq.parentTarget.col && parent.tileRow === seq.parentTarget.row)
+
+          // Both have arrived at their respective meeting tiles
+          if (childArrived && parentArrived) {
+            child.path = []
+            child.state = CharacterState.IDLE
+            child.greetLocked = true
+            if (parent) {
+              parent.greetLocked = true
+              parent.path = []
+              parent.state = CharacterState.IDLE
+              child.dir = this.directionToward(child.tileCol, child.tileRow, parent.tileCol, parent.tileRow)
+              parent.dir = this.directionToward(parent.tileCol, parent.tileRow, child.tileCol, child.tileRow)
+              // Detect if parent is not physically nearby (wandered away from greeting tile)
+              const distToParent = Math.abs(parent.tileCol - child.tileCol) + Math.abs(parent.tileRow - child.tileRow)
+              if (seq.isExit && distToParent > 3) {
+                seq.parentAbsent = true
+              }
+            } else {
+              // Parent character doesn't exist
+              if (seq.isExit) seq.parentAbsent = true
+            }
+            seq.phase = 'pause'
+            seq.timer = 1.0
+          } else if (child.path.length === 0 && child.state !== CharacterState.WALK) {
+            // Child lost path mid-walk — try to re-path to target
+            const path = findPath(child.tileCol, child.tileRow, target.col, target.row, this.tileMap, this.blockedTiles)
+            if (path.length > 0) {
+              child.path = path
+              child.state = CharacterState.WALK
+              child.moveProgress = 0
+            } else {
+              seq.phase = 'complete'
+            }
+          }
+          break
+        }
+
+        case 'pause': {
+          child.path = []
+          child.state = CharacterState.IDLE
+          if (parent) {
+            parent.path = []
+            parent.state = CharacterState.IDLE
+            child.dir = this.directionToward(child.tileCol, child.tileRow, parent.tileCol, parent.tileRow)
+            parent.dir = this.directionToward(parent.tileCol, parent.tileRow, child.tileCol, child.tileRow)
+          }
+          seq.timer -= dt
+          if (seq.timer <= 0) {
+            const emoji = seq.isExit ? '❤️' : '😊'
+            if (parent) this.pushCodeSnippet(parent.id, emoji)
+            seq.phase = 'parent_smile'
+            seq.timer = 1.0
+          }
+          break
+        }
+
+        case 'parent_smile': {
+          child.path = []
+          child.state = CharacterState.IDLE
+          if (parent) { parent.path = []; parent.state = CharacterState.IDLE }
+          seq.timer -= dt
+          if (seq.timer <= 0) {
+            this.pushCodeSnippet(child.id, seq.isExit ? '❤️' : '😊')
+            seq.phase = 'child_smile'
+            seq.timer = 1.0
+          }
+          break
+        }
+
+        case 'child_smile': {
+          child.path = []
+          child.state = CharacterState.IDLE
+          if (parent) { parent.path = []; parent.state = CharacterState.IDLE }
+          seq.timer -= dt
+          if (seq.timer <= 0) {
+            seq.phase = 'final_pause'
+            seq.timer = 1.0
+          }
+          break
+        }
+
+        case 'final_pause': {
+          child.path = []
+          child.state = CharacterState.IDLE
+          if (parent) { parent.path = []; parent.state = CharacterState.IDLE }
+          seq.timer -= dt
+          if (seq.timer <= 0) {
+            seq.phase = 'complete'
+          }
+          break
+        }
+
+        case 'complete': {
+          child.greetLocked = false
+          if (parent) parent.greetLocked = false
+
+          if (seq.isExit) {
+            child.bubbleType = null
+            // After farewell (whether MainAgent was present or not), walk to bottom-right corner
+            if (!this.walkToBottomRightThenDespawn(child)) {
+              child.matrixEffect = 'despawn'
+              child.matrixEffectTimer = 0
+              child.matrixEffectSeeds = matrixEffectSeeds()
+            }
+          } else {
+            // Walk to assigned seat
+            if (child.seatId) {
+              const seat = this.seats.get(child.seatId)
+              if (seat) {
+                const path = this.withOwnSeatUnblocked(child, () =>
+                  findPath(child.tileCol, child.tileRow, Math.round(seat.seatCol), Math.round(seat.seatRow), this.tileMap, this.blockedTiles)
+                )
+                if (path.length > 0) {
+                  child.path = path
+                  child.state = CharacterState.WALK
+                  child.moveProgress = 0
+                }
+              }
+            }
+          }
+          completed.push(childId)
+          break
+        }
+      }
+    }
+
+    for (const id of completed) this.activeGreetings.delete(id)
+    // After any greeting completes, let the next queued agent proceed
+    if (completed.length > 0) this.processGreetQueue()
+  }
+
   private findClosestWalkable(targetCol: number, targetRow: number): { col: number; row: number } {
     if (this.walkableTiles.length === 0) return { col: 1, row: 1 }
     let best = this.walkableTiles[0]
@@ -861,6 +1225,101 @@ export class OfficeState {
       }
     }
     return best
+  }
+
+  /** Find a walkable tile near the sofa/lounge area, for temp workers with no assigned seat */
+  private findSofaAreaTile(): { col: number; row: number } | null {
+    const sofa = this.layout.furniture.find(
+      (f) => f.type === FurnitureType.SOFA || f.type === FurnitureType.BENCH,
+    )
+    if (!sofa) return null
+    return this.findClosestWalkable(sofa.col, sofa.row)
+  }
+
+  /** Find the walkable tile closest to the bottom-right corner of the map */
+  private findBottomRightCornerTile(): { col: number; row: number } | null {
+    if (this.walkableTiles.length === 0) return null
+    // Bottom-right in tile space = max col + max row
+    const maxCol = Math.max(...this.walkableTiles.map((t) => t.col))
+    const maxRow = Math.max(...this.walkableTiles.map((t) => t.row))
+    return this.findClosestWalkable(maxCol, maxRow)
+  }
+
+  /**
+   * Walk character to the bottom-right corner then despawn.
+   * Unlike findExitWalkPath, accepts any path length >= 1 so nearby agents still move.
+   */
+  private walkToBottomRightThenDespawn(ch: Character): boolean {
+    const corner = this.findBottomRightCornerTile()
+    if (!corner) return false
+    if (corner.col === ch.tileCol && corner.row === ch.tileRow) {
+      // Already there — despawn directly
+      ch.matrixEffect = 'despawn'
+      ch.matrixEffectTimer = 0
+      ch.matrixEffectSeeds = matrixEffectSeeds()
+      return true
+    }
+    const path = findPath(ch.tileCol, ch.tileRow, corner.col, corner.row, this.tileMap, this.blockedTiles)
+    if (path.length === 0) return false
+    ch.path = path
+    ch.state = CharacterState.WALK
+    ch.moveProgress = 0
+    ch.pendingDespawn = corner
+    return true
+  }
+
+  /**
+   * Find a walk-back path for a departing temp worker.
+   * Ensures the path is long enough that the worker visibly walks away from MainAgent.
+   * Falls back to the sofa area or any distant tile if the primary target is unreachable.
+   */
+  private findExitWalkPath(
+    child: Character,
+    preferredTarget: { col: number; row: number } | null,
+  ): { path: Array<{ col: number; row: number }>; target: { col: number; row: number } } | null {
+    const MIN_WALK_TILES = 5 // must walk at least this many steps
+
+    const tryTarget = (target: { col: number; row: number }) => {
+      if (target.col === child.tileCol && target.row === child.tileRow) return null
+      const path = findPath(child.tileCol, child.tileRow, target.col, target.row, this.tileMap, this.blockedTiles)
+      if (path.length >= MIN_WALK_TILES) return { path, target }
+      return null
+    }
+
+    // 1. Try preferred target (seat area)
+    if (preferredTarget) {
+      const result = tryTarget(preferredTarget)
+      if (result) return result
+    }
+
+    // 2. Try sofa area
+    const sofaTile = this.findSofaAreaTile()
+    if (sofaTile) {
+      const result = tryTarget(sofaTile)
+      if (result) return result
+    }
+
+    // 3. Find any walkable tile sufficiently far from current position
+    const { tileCol: cx, tileRow: cy } = child
+    const farTile = this.walkableTiles
+      .filter((t) => Math.abs(t.col - child.tileCol) + Math.abs(t.row - child.tileRow) >= MIN_WALK_TILES)
+      .sort((a, b) => {
+        // Prefer tiles far from child but in direction away from center of map
+        const da = Math.abs(a.col - cx) + Math.abs(a.row - cy)
+        const db = Math.abs(b.col - cx) + Math.abs(b.row - cy)
+        return db - da
+      })
+      .find((t) => {
+        const path = findPath(child.tileCol, child.tileRow, t.col, t.row, this.tileMap, this.blockedTiles)
+        return path.length >= MIN_WALK_TILES
+      })
+
+    if (farTile) {
+      const path = findPath(child.tileCol, child.tileRow, farTile.col, farTile.row, this.tileMap, this.blockedTiles)
+      return { path, target: farTile }
+    }
+
+    return null
   }
 
   private getGatewaySrePatrolTiles(): Array<{ col: number; row: number }> {
@@ -881,7 +1340,7 @@ export class OfficeState {
         return { col: candidate.col, row: candidate.row }
       }
     }
-    return this.findClosestWalkable(2, 14)
+    return this.findClosestWalkable(18, 14)
   }
 
   private getGatewaySreDegradedTiles(
@@ -1287,6 +1746,9 @@ export class OfficeState {
     ch.matrixEffectSeeds = matrixEffectSeeds()
     this.characters.set(id, ch)
 
+    // Join MainAgent greeting queue (waits in place if MainAgent is busy)
+    this.tryStartGreeting(ch)
+
     this.subagentIdMap.set(key, id)
     this.subagentMeta.set(id, { parentAgentId, parentToolId })
     return id
@@ -1301,26 +1763,67 @@ export class OfficeState {
     const ch = this.characters.get(id)
     if (ch) {
       if (ch.matrixEffect === 'despawn') {
-        // Already despawning — just clean up maps
         this.subagentIdMap.delete(key)
         this.subagentMeta.delete(id)
+        this.lingerSubagents.delete(id)
         return
       }
-      if (ch.seatId) {
-        const seat = this.seats.get(ch.seatId)
-        if (seat) seat.assigned = false
-      }
-      // Start despawn animation — keep character in map for rendering
-      ch.matrixEffect = 'despawn'
-      ch.matrixEffectTimer = 0
-      ch.matrixEffectSeeds = matrixEffectSeeds()
-      ch.bubbleType = null
+      // If already lingering, do nothing — let the timer run
+      if (this.lingerSubagents.has(id)) return
+      // Start linger: stay at seat for 60s, then do farewell
+      this.lingerSubagents.set(id, 60)
+      this.subagentIdMap.delete(key)
+      this.subagentMeta.delete(id)
+      if (this.selectedAgentId === id) this.selectedAgentId = null
+      if (this.cameraFollowId === id) this.cameraFollowId = null
+      return
     }
-    // Clean up tracking maps immediately so keys don't collide
     this.subagentIdMap.delete(key)
     this.subagentMeta.delete(id)
-    if (this.selectedAgentId === id) this.selectedAgentId = null
-    if (this.cameraFollowId === id) this.cameraFollowId = null
+  }
+
+  /** Internal: execute the actual farewell sequence for a subagent (called after linger) */
+  private startSubagentFarewell(id: number): void {
+    const ch = this.characters.get(id)
+    if (!ch || ch.matrixEffect === 'despawn') {
+      this.characters.delete(id)
+      return
+    }
+    // Save a walkable return position before freeing seat.
+    // Seat tile itself is often blocked by chair furniture, so use nearest walkable floor tile.
+    let exitReturnPos: { col: number; row: number } | null = null
+    if (ch.seatId) {
+      const seat = this.seats.get(ch.seatId)
+      if (seat) {
+        exitReturnPos = this.findClosestWalkable(Math.round(seat.seatCol), Math.round(seat.seatRow))
+        seat.assigned = false
+      }
+      ch.seatId = null
+    }
+    // No seat — fall back to sofa/lounge area
+    if (!exitReturnPos) exitReturnPos = this.findSofaAreaTile()
+
+    ch.bubbleType = null
+    // Queue farewell greeting with MainAgent (isExit=true marks it as a departure)
+    this.tryStartGreeting(ch)
+    if (this.activeGreetings.has(id)) {
+      // Already started greeting immediately — mark as exit
+      const seq = this.activeGreetings.get(id)!
+      seq.isExit = true
+      seq.exitReturnPos = exitReturnPos
+    } else if (this.greetQueue.includes(id)) {
+      // In queue — when processed, processGreetQueue will set isExit=true
+      this.exitOnGreetComplete.add(id)
+      // Stash the return position until the greeting actually starts
+      if (exitReturnPos) this.exitReturnStash.set(id, exitReturnPos)
+    } else {
+      // No MainAgent reachable — walk to bottom-right corner then despawn
+      if (!this.walkToBottomRightThenDespawn(ch)) {
+        ch.matrixEffect = 'despawn'
+        ch.matrixEffectTimer = 0
+        ch.matrixEffectSeeds = matrixEffectSeeds()
+      }
+    }
   }
 
   /** Remove all sub-agents belonging to a parent agent */
@@ -1332,20 +1835,62 @@ export class OfficeState {
         const ch = this.characters.get(id)
         if (ch) {
           if (ch.matrixEffect === 'despawn') {
-            // Already despawning — just clean up maps
             this.subagentMeta.delete(id)
+            toRemove.push(key)
+            continue
+          }
+          if (this.activeGreetings.has(id)) {
+            const seq = this.activeGreetings.get(id)!
+            seq.isExit = true
+            if (ch.seatId) {
+              const seat = this.seats.get(ch.seatId)
+              if (seat) seat.assigned = false
+              ch.seatId = null
+            }
+            this.subagentMeta.delete(id)
+            if (this.selectedAgentId === id) this.selectedAgentId = null
+            if (this.cameraFollowId === id) this.cameraFollowId = null
             toRemove.push(key)
             continue
           }
           if (ch.seatId) {
             const seat = this.seats.get(ch.seatId)
             if (seat) seat.assigned = false
+            ch.seatId = null
           }
-          // Start despawn animation
-          ch.matrixEffect = 'despawn'
-          ch.matrixEffectTimer = 0
-          ch.matrixEffectSeeds = matrixEffectSeeds()
           ch.bubbleType = null
+          const parentCh = this.characters.get(parentAgentId)
+          const greetTile = parentCh ? this.findAdjacentWalkable(parentCh) : null
+          if (greetTile && parentCh) {
+            const path = findPath(ch.tileCol, ch.tileRow, greetTile.col, greetTile.row, this.tileMap, this.blockedTiles)
+            if (path.length > 0) {
+              ch.path = path
+              ch.state = CharacterState.WALK
+              ch.moveProgress = 0
+              this.activeGreetings.set(id, {
+                childId: id,
+                parentId: parentAgentId,
+                childTarget: greetTile,
+                parentTarget: null,
+                waitTarget: null,
+                phase: 'walk',
+                timer: 0,
+                isExit: true,
+                exitReturnPos: ch.pendingDespawn && ch.pendingDespawn !== true ? ch.pendingDespawn : null,
+              })
+              this.subagentMeta.delete(id)
+              if (this.selectedAgentId === id) this.selectedAgentId = null
+              if (this.cameraFollowId === id) this.cameraFollowId = null
+              toRemove.push(key)
+              continue
+            }
+          }
+          // No greeting path — walk to bottom-right corner then despawn
+          if (!this.walkToBottomRightThenDespawn(ch)) {
+            ch.matrixEffect = 'despawn'
+            ch.matrixEffectTimer = 0
+            ch.matrixEffectSeeds = matrixEffectSeeds()
+          }
         }
         this.subagentMeta.delete(id)
         if (this.selectedAgentId === id) this.selectedAgentId = null
@@ -1399,6 +1944,10 @@ export class OfficeState {
         ch.seatTimer = -1
         ch.path = []
         ch.moveProgress = 0
+      }
+      // Greet MainAgent on start-work and stop-work transitions
+      if (!ch.isSubagent && !ch.isSystemRole) {
+        this.tryStartGreeting(ch)
       }
       this.rebuildFurnitureInstances()
     }
@@ -1471,6 +2020,13 @@ export class OfficeState {
     }
   }
 
+  setAgentTaskText(id: number, text: string | undefined): void {
+    const ch = this.characters.get(id)
+    if (ch) {
+      ch.taskText = text
+    }
+  }
+
   showPermissionBubble(id: number): void {
     const ch = this.characters.get(id)
     if (ch) {
@@ -1525,9 +2081,170 @@ export class OfficeState {
     }
   }
 
+  /**
+   * Collision avoidance: when two walking characters contest the same next tile,
+   * the one farther from its destination steps aside (sideways first, then backwards)
+   * and waits for the closer one to pass before resuming.
+   */
+  /** Find a free adjacent tile for a character to dodge to, or null if none found */
+  private findDodgeTile(
+    ch: Character,
+    dc: number, dr: number,
+    walkableSet: Set<string>,
+    occupiedKeys: Set<string>,
+    claimedNext: Map<string, number>,
+  ): { col: number; row: number } | null {
+    const candidates: Array<{ col: number; row: number }> = dc !== 0 || dr !== 0
+      ? [
+          { col: ch.tileCol + dr,  row: ch.tileRow + dc  }, // side A (perpendicular)
+          { col: ch.tileCol - dr,  row: ch.tileRow - dc  }, // side B (perpendicular)
+          { col: ch.tileCol - dc,  row: ch.tileRow - dr  }, // backwards
+        ]
+      : [
+          // No direction info — try all 4 neighbours
+          { col: ch.tileCol + 1, row: ch.tileRow },
+          { col: ch.tileCol - 1, row: ch.tileRow },
+          { col: ch.tileCol,     row: ch.tileRow + 1 },
+          { col: ch.tileCol,     row: ch.tileRow - 1 },
+        ]
+
+    for (const cand of candidates) {
+      const key = `${cand.col},${cand.row}`
+      if (!walkableSet.has(key)) continue
+      if (this.blockedTiles.has(key)) continue
+      if (occupiedKeys.has(key)) continue
+      if (claimedNext.has(key)) continue
+      return cand
+    }
+    return null
+  }
+
+  private resolveWalkConflicts(): void {
+    const allHumanoids: Character[] = []
+    for (const ch of this.characters.values()) {
+      if (ch.matrixEffect || ch.isCat || ch.isLobster || ch.greetLocked) continue
+      if (ch.yieldTimer > 0) continue
+      allHumanoids.push(ch)
+    }
+    if (allHumanoids.length < 2) return
+
+    // Current tile positions of every character (for dodge-target exclusion)
+    const occupiedKeys = new Set<string>()
+    for (const ch of this.characters.values()) {
+      occupiedKeys.add(`${ch.tileCol},${ch.tileRow}`)
+    }
+
+    const walkableSet = new Set<string>(this.walkableTiles.map(t => `${t.col},${t.row}`))
+
+    // claimedNext: tiles that are "taken" — no other character may step into them.
+    // Pre-populate with standing characters' current tiles only.
+    // Walking characters claim their next tile dynamically in Pass 1 (sorted by priority).
+    const claimedNext = new Map<string, number>()
+    for (const ch of allHumanoids) {
+      if (ch.state !== CharacterState.WALK) {
+        claimedNext.set(`${ch.tileCol},${ch.tileRow}`, ch.id)
+      }
+    }
+
+    // ── Pass 1: next-tile conflicts ───────────────────────────────────────────
+    // All walkers (including mid-step), sorted by remaining path length.
+    // Shorter path = closer to destination = higher priority = claims the tile.
+    // Loser is snapped back to current tile and must dodge.
+    const walkers = allHumanoids.filter(
+      ch => ch.state === CharacterState.WALK && !ch.yieldDestination && ch.path.length > 0,
+    )
+    walkers.sort((a, b) => a.path.length - b.path.length)
+
+    for (const ch of walkers) {
+      const next = ch.path[0]
+      const key = `${next.col},${next.row}`
+      if (!claimedNext.has(key)) {
+        // Also claim current tile so no one walks into us from behind
+        claimedNext.set(`${ch.tileCol},${ch.tileRow}`, ch.id)
+        claimedNext.set(key, ch.id)
+        continue
+      }
+      // Tile is taken — snap back to current tile and dodge
+      if (ch.moveProgress > 0) {
+        // Abort mid-step: snap back to the tile we came from
+        ch.x = ch.tileCol * TILE_SIZE + TILE_SIZE / 2
+        ch.y = ch.tileRow * TILE_SIZE + TILE_SIZE / 2
+        ch.moveProgress = 0
+      }
+      const dest = ch.path[ch.path.length - 1]
+      const dc = next.col - ch.tileCol
+      const dr = next.row - ch.tileRow
+      const dodgeTile = this.findDodgeTile(ch, dc, dr, walkableSet, occupiedKeys, claimedNext)
+      if (dodgeTile) {
+        ch.path = [dodgeTile]
+        ch.moveProgress = 0
+        // Face the dodge direction immediately so the character doesn't appear to
+        // move backward while still facing forward.
+        ch.dir = this.directionToward(ch.tileCol, ch.tileRow, dodgeTile.col, dodgeTile.row)
+        ch.yieldDestination = { col: dest.col, row: dest.row }
+        claimedNext.set(`${ch.tileCol},${ch.tileRow}`, ch.id)
+        claimedNext.set(`${dodgeTile.col},${dodgeTile.row}`, ch.id)
+      } else {
+        ch.path = []
+        ch.yieldTimer = 0.5 + Math.random() * 0.4
+        ch.yieldDestination = { col: dest.col, row: dest.row }
+        claimedNext.set(`${ch.tileCol},${ch.tileRow}`, ch.id)
+      }
+    }
+
+    // ── Pass 2: hard overlap — same tileCol/tileRow right now ────────────────
+    const tileGroups = new Map<string, Character[]>()
+    for (const ch of allHumanoids) {
+      const key = `${ch.tileCol},${ch.tileRow}`
+      const g = tileGroups.get(key)
+      if (g) g.push(ch)
+      else tileGroups.set(key, [ch])
+    }
+
+    for (const group of tileGroups.values()) {
+      if (group.length < 2) continue
+
+      // Highest priority (index 0) stays; others dodge
+      group.sort((a, b) => {
+        const aScore = a.state === CharacterState.WALK ? a.path.length : 9999
+        const bScore = b.state === CharacterState.WALK ? b.path.length : 9999
+        return aScore - bScore
+      })
+
+      for (let i = 1; i < group.length; i++) {
+        const dodger = group[i]
+        if (dodger.yieldTimer > 0 || dodger.yieldDestination) continue
+
+        const dc = dodger.dir === Direction.RIGHT ? 1 : dodger.dir === Direction.LEFT ? -1 : 0
+        const dr = dodger.dir === Direction.DOWN  ? 1 : dodger.dir === Direction.UP   ? -1 : 0
+
+        const dodgeTile = this.findDodgeTile(dodger, dc, dr, walkableSet, occupiedKeys, claimedNext)
+        if (dodgeTile) {
+          if (dodger.state === CharacterState.WALK && dodger.path.length > 0) {
+            const orig = dodger.path[dodger.path.length - 1]
+            dodger.yieldDestination = { col: orig.col, row: orig.row }
+          }
+          dodger.path = [dodgeTile]
+          dodger.moveProgress = 0
+          dodger.state = CharacterState.WALK
+          dodger.frame = 0
+          dodger.frameTimer = 0
+          // Face the dodge direction immediately
+          dodger.dir = this.directionToward(dodger.tileCol, dodger.tileRow, dodgeTile.col, dodgeTile.row)
+          claimedNext.set(`${dodgeTile.col},${dodgeTile.row}`, dodger.id)
+          occupiedKeys.delete(`${dodger.tileCol},${dodger.tileRow}`)
+          occupiedKeys.add(`${dodgeTile.col},${dodgeTile.row}`)
+        } else {
+          dodger.yieldTimer = 0.3 + Math.random() * 0.3
+        }
+      }
+    }
+  }
+
   update(dt: number): void {
     this.ensureGatewaySre()
     this.bugSystem.update(dt, this.bugWorldWidth, this.bugWorldHeight)
+    this.resolveWalkConflicts()
     const toDelete: number[] = []
     const firstIdleHumanoid = this.getFirstIdleHumanoid()
     for (const ch of this.characters.values()) {
@@ -1553,13 +2270,40 @@ export class OfficeState {
         continue
       }
 
-      if (ch.systemRoleType === 'gateway_sre') {
+      // Yield timer: character is waiting at dodge tile before resuming
+      if (ch.yieldTimer > 0) {
+        ch.yieldTimer = Math.max(0, ch.yieldTimer - dt)
+        if (ch.yieldTimer === 0 && ch.yieldDestination) {
+          const dest = ch.yieldDestination
+          ch.yieldDestination = null
+          const resumePath = findPath(ch.tileCol, ch.tileRow, dest.col, dest.row, this.tileMap, this.blockedTiles)
+          if (resumePath.length > 0) {
+            ch.path = resumePath
+            ch.moveProgress = 0
+            ch.state = CharacterState.WALK
+            ch.frame = 0
+            ch.frameTimer = 0
+          }
+        }
+        continue // frozen while waiting
+      }
+
+      if (ch.systemRoleType === 'gateway_sre' && !ch.greetLocked) {
         this.updateGatewaySreCharacter(ch, dt)
       } else {
         // Temporarily unblock own seat so character can pathfind to it
+        // (greetLocked guards inside updateCharacter prevent repath-to-seat during greeting)
         this.withOwnSeatUnblocked(ch, () =>
           updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles, this.interactionPoints)
         )
+      }
+
+      // If character just finished walking to dodge tile, start wait timer
+      if (ch.yieldDestination && ch.state !== CharacterState.WALK && ch.path.length === 0) {
+        ch.yieldTimer = 0.6 + Math.random() * 0.5
+        ch.state = CharacterState.IDLE
+        ch.frame = 0
+        ch.frameTimer = 0
       }
 
       if (ch.isLobster) {
@@ -1641,6 +2385,32 @@ export class OfficeState {
         }
       }
     }
+    // Tick linger timers — only count down while character is actually sitting at seat
+    if (this.lingerSubagents.size > 0) {
+      const lingerExpired: number[] = []
+      for (const [lingerId, timer] of this.lingerSubagents) {
+        const ch = this.characters.get(lingerId)
+        if (!ch) { lingerExpired.push(lingerId); continue }
+        // Only count down while character is idle/typing at their seat (not walking or greeting)
+        const isRestingAtSeat =
+          ch.seatId !== null &&
+          ch.state !== CharacterState.WALK &&
+          !this.activeGreetings.has(lingerId) &&
+          !this.greetQueue.includes(lingerId)
+        if (!isRestingAtSeat) continue
+        const remaining = timer - dt
+        if (remaining <= 0) {
+          lingerExpired.push(lingerId)
+        } else {
+          this.lingerSubagents.set(lingerId, remaining)
+        }
+      }
+      for (const lingerId of lingerExpired) {
+        this.lingerSubagents.delete(lingerId)
+        this.startSubagentFarewell(lingerId)
+      }
+    }
+    this.updateGreetings(dt)
     // Remove characters that finished despawn
     for (const id of toDelete) {
       this.characters.delete(id)

@@ -5,6 +5,7 @@ import { getConfigCache, setConfigCache } from "@/lib/config-cache";
 import { OPENCLAW_CONFIG_PATH, OPENCLAW_HOME } from "@/lib/openclaw-paths";
 import { shouldHidePlatformChannel } from "@/lib/platforms";
 import { enrichModelMeta } from "@/lib/known-providers";
+import { detectChangeAndBackup } from "@/lib/config-backup";
 
 // 配置文件路径：优先使用 OPENCLAW_HOME 环境变量，否则默认 ~/.openclaw
 const CONFIG_PATH = OPENCLAW_CONFIG_PATH;
@@ -232,6 +233,25 @@ function getChannelDirectPeerIds(
   return map;
 }
 // 从 IDENTITY.md 读取机器人名字
+function readIdentityEmoji(agentId: string, agentDir?: string, workspace?: string): string | null {
+  const candidates = [
+    agentDir ? path.join(agentDir, "IDENTITY.md") : null,
+    workspace ? path.join(workspace, "IDENTITY.md") : null,
+    path.join(OPENCLAW_DIR, `agents/${agentId}/agent/IDENTITY.md`),
+    path.join(OPENCLAW_DIR, `workspace-${agentId}/IDENTITY.md`),
+    agentId === "main" ? path.join(OPENCLAW_DIR, `workspace/IDENTITY.md`) : null,
+  ].filter(Boolean) as string[];
+
+  for (const p of candidates) {
+    try {
+      const content = fs.readFileSync(p, "utf-8");
+      const match = content.match(/\*\*Emoji:\*\*\s*(\S+)/);
+      if (match?.[1]) return match[1].trim();
+    } catch {}
+  }
+  return null;
+}
+
 function readIdentityName(agentId: string, agentDir?: string, workspace?: string): string | null {
   const candidates = [
     agentDir ? path.join(agentDir, "IDENTITY.md") : null,
@@ -264,6 +284,10 @@ export async function GET() {
 
   try {
     const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+
+    // 偵測 openclaw.json 是否有變更，若有則自動備份
+    detectChangeAndBackup(raw);
+
     const config = JSON.parse(raw);
 
     // 提取 agents 信息
@@ -351,7 +375,8 @@ export async function GET() {
       const id = agent.id;
       const identityName = readIdentityName(id, agent.agentDir, agent.workspace);
       const name = identityName || agent.name || id;
-      const emoji = agent.identity?.emoji || "🤖";
+      const identityEmoji = readIdentityEmoji(id, agent.agentDir, agent.workspace);
+      const emoji = identityEmoji || agent.identity?.emoji || agent.emoji || "🤖";
       const model = normalizeModelRef(agent.model, defaultModel);
 
       // 查找绑定的平台
@@ -538,6 +563,13 @@ export async function GET() {
       }
     }
 
+    // 取得 openclaw.json 的最後修改時間，用於前端偵測近期 config 變更
+    let configLastModified: string | null = null;
+    try {
+      const stat = fs.statSync(CONFIG_PATH);
+      configLastModified = stat.mtime.toISOString();
+    } catch { /* ignore */ }
+
     const data = {
       agents: agentsWithStatus,
       providers,
@@ -545,9 +577,10 @@ export async function GET() {
       gateway: {
         port: config.gateway?.port || 18789,
         token: config.gateway?.auth?.token || "",
-        host: config.gateway?.host || config.gateway?.hostname || "",
+        host: process.env.NEXT_PUBLIC_GATEWAY_CHAT_BASE_URL || config.gateway?.host || config.gateway?.hostname || "",
       },
       groupChats,
+      configLastModified,
     };
     setConfigCache({ data, ts: Date.now() });
     return NextResponse.json(data);

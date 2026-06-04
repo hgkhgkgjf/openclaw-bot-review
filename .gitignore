@@ -11,3 +11,5 @@ next-env.d.ts
 rd-council-work-orders.json
 self-improvement-command-log.jsonl
 rd-council-decision-log.jsonl
+.env.local
+.env.*.local
