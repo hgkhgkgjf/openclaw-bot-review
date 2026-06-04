@@ -1125,16 +1125,18 @@ export async function POST() {
       const accountId = feishuBinding?.match?.accountId || id;
       const account = feishuAccounts[accountId];
 
-      if (account && account.appId && account.appSecret && !testedFeishuAccounts.has(accountId)) {
-        testedFeishuAccounts.add(accountId);
+      // Use account-specific credentials if available, otherwise fall back to top-level config
+      const testAppId = account?.appId || feishuConfig.appId;
+      const testAppSecret = account?.appSecret || feishuConfig.appSecret;
+      const testAccountId = account ? accountId : "default";
+
+      // Test if: has binding, OR is main agent (main tests even without explicit binding)
+      const shouldTest = (feishuBinding || id === "main") && testAppId && testAppSecret && !testedFeishuAccounts.has(testAccountId);
+
+      if (shouldTest) {
+        testedFeishuAccounts.add(testAccountId);
         const testUserId = getFeishuDmUser(id);
-        platformTests.push(testFeishu(id, accountId, account.appId, account.appSecret, feishuDomain, testUserId));
-      } else if (!feishuBinding && !account) {
-        if (id === "main" && feishuConfig.enabled && feishuConfig.appId && feishuConfig.appSecret && !testedFeishuAccounts.has("main")) {
-          testedFeishuAccounts.add("main");
-          const testUserId = getFeishuDmUser("main");
-          platformTests.push(testFeishu(id, "main", feishuConfig.appId, feishuConfig.appSecret, feishuDomain, testUserId));
-        }
+        platformTests.push(testFeishu(id, testAccountId, testAppId, testAppSecret, feishuDomain, testUserId));
       }
 
       // Discord: only test once, via local OpenClaw channel gateway
@@ -1147,8 +1149,11 @@ export async function POST() {
         sequentialPlatformTests.push(() => testDiscord(id, discordConfig.token, discordTestUser, source));
       }
 
-      // Telegram: only test once, via local OpenClaw channel gateway
-      if (id === "main" && telegramConfig.enabled) {
+      // Telegram: test the main agent plus any non-main agent explicitly bound to telegram
+      const hasTelegramBinding = bindings.some(
+        (b: any) => b.agentId === id && b.match?.channel === "telegram"
+      );
+      if (telegramConfig.enabled && (id === "main" || hasTelegramBinding)) {
         const telegramTestUser = getTelegramDmUser(id);
         sequentialPlatformTests.push(() => testTelegram(id, telegramTestUser));
       }
