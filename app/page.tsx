@@ -71,7 +71,7 @@ interface AllStats {
   monthly: DayStat[];
 }
 
-type TimeRange = "daily" | "weekly" | "monthly";
+type TimeRange = "daily" | "weekly" | "monthly" | "total";
 
 interface SubagentActivityEvent {
   key: string;
@@ -238,7 +238,7 @@ export default function Home() {
   const [agentStates, setAgentStates] = useState<Record<string, string>>(cachedHomeAgentStates);
   const [agentActivity, setAgentActivity] = useState<AgentActivityData[] | null>(null);
 
-  const RANGE_LABELS: Record<TimeRange, string> = { daily: t("range.daily"), weekly: t("range.weekly"), monthly: t("range.monthly") };
+  const RANGE_LABELS: Record<TimeRange, string> = { daily: t("range.daily"), weekly: t("range.weekly"), monthly: t("range.monthly"), total: t("range.total") };
 
   const REFRESH_OPTIONS = [
     { label: t("refresh.manual"), value: 0 },
@@ -780,10 +780,34 @@ export default function Home() {
             </div>
           </div>
           {(() => {
-            const currentData = allStats[statsRange];
-            const totalInput = currentData.reduce((s, d) => s + d.inputTokens, 0);
-            const totalOutput = currentData.reduce((s, d) => s + d.outputTokens, 0);
-            const totalMsgs = currentData.reduce((s, d) => s + d.messageCount, 0);
+            const currentData = statsRange === "total" ? allStats.monthly : allStats[statsRange];
+            let totalInput: number, totalOutput: number, totalMsgs: number;
+            if (statsRange === "total") {
+              // Sum all data points (use daily for accurate totals, chart uses monthly)
+              const allDaily = allStats.daily;
+              totalInput = allDaily.reduce((s, d) => s + d.inputTokens, 0);
+              totalOutput = allDaily.reduce((s, d) => s + d.outputTokens, 0);
+              totalMsgs = allDaily.reduce((s, d) => s + d.messageCount, 0);
+            } else {
+              // Show current period only (today/this week/this month)
+              const now = new Date();
+              const getCurrentPeriodKey = () => {
+                if (statsRange === "daily") return now.toISOString().slice(0, 10);
+                if (statsRange === "weekly") {
+                  const day = now.getUTCDay();
+                  const mondayOffset = day === 0 ? -6 : 1 - day;
+                  const monday = new Date(now.getTime() + mondayOffset * 86400000);
+                  return monday.toISOString().slice(0, 10);
+                }
+                return now.toISOString().slice(0, 7); // monthly
+              };
+              const periodKey = getCurrentPeriodKey();
+              const latestEntry = currentData.length > 0 ? currentData[currentData.length - 1] : null;
+              const currentEntry = latestEntry?.date === periodKey ? latestEntry : null;
+              totalInput = currentEntry?.inputTokens ?? 0;
+              totalOutput = currentEntry?.outputTokens ?? 0;
+              totalMsgs = currentEntry?.messageCount ?? 0;
+            }
             return (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">

@@ -174,6 +174,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "range.daily": "按日",
     "range.weekly": "按週",
     "range.monthly": "按月",
+    "range.total": "總計",
 
     // refresh options
     "refresh.manual": "手動重新整理",
@@ -499,6 +500,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "range.daily": "按天",
     "range.weekly": "按周",
     "range.monthly": "按月",
+    "range.total": "总计",
 
     // refresh options
     "refresh.manual": "手动刷新",
@@ -828,6 +830,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "range.daily": "Daily",
     "range.weekly": "Weekly",
     "range.monthly": "Monthly",
+    "range.total": "Total",
 
     // refresh options
     "refresh.manual": "Manual Refresh",

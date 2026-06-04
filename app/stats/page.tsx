@@ -360,9 +360,26 @@ function StatsDetail({ agentId }: { agentId: string }) {
   if (!stats) return null;
 
   const currentData = stats[range];
-  const totalInput = currentData.reduce((s, d) => s + d.inputTokens, 0);
-  const totalOutput = currentData.reduce((s, d) => s + d.outputTokens, 0);
-  const totalMessages = currentData.reduce((s, d) => s + d.messageCount, 0);
+
+  // Summary cards show the current period only (latest entry = today/this week/this month)
+  const latestEntry = currentData.length > 0 ? currentData[currentData.length - 1] : null;
+  const now = new Date();
+  const isCurrentPeriod = (entry: typeof latestEntry) => {
+    if (!entry) return false;
+    if (range === "daily") return entry.date === now.toISOString().slice(0, 10);
+    if (range === "weekly") {
+      const day = now.getUTCDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now.getTime() + mondayOffset * 86400000);
+      return entry.date === monday.toISOString().slice(0, 10);
+    }
+    if (range === "monthly") return entry.date === now.toISOString().slice(0, 7);
+    return false;
+  };
+  const currentEntry = isCurrentPeriod(latestEntry) ? latestEntry : null;
+  const totalInput = currentEntry?.inputTokens ?? 0;
+  const totalOutput = currentEntry?.outputTokens ?? 0;
+  const totalMessages = currentEntry?.messageCount ?? 0;
 
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-6xl mx-auto">

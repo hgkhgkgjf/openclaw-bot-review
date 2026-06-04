@@ -71,17 +71,21 @@ function scanSkillsDir(dir: string, source: string): SkillInfo[] {
   return skills;
 }
 
-function getConfiguredAgentWorkspaces(): Array<{ id: string; workspace?: string }> {
+function getConfiguredAgentWorkspaces(): Array<{ id: string; workspace?: string; agentDir?: string }> {
   if (!fs.existsSync(OPENCLAW_CONFIG_PATH)) return [];
 
   try {
     const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf-8"));
     const agentList = Array.isArray(config.agents?.list) ? config.agents.list : [];
     return agentList
-      .filter((agent: unknown): agent is { id: string; workspace?: string } => {
+      .filter((agent: unknown): agent is { id: string; workspace?: string; agentDir?: string } => {
         return Boolean(agent && typeof agent === "object" && typeof (agent as { id?: string }).id === "string");
       })
-      .map((agent: { id: string; workspace?: string }) => ({ id: agent.id, workspace: agent.workspace }));
+      .map((agent: { id: string; workspace?: string; agentDir?: string }) => ({
+        id: agent.id,
+        workspace: agent.workspace,
+        agentDir: agent.agentDir,
+      }));
   } catch {
     return [];
   }
@@ -102,8 +106,8 @@ function getWorkspaceSkillSources(): Array<{ dir: string; source: string }> {
   addSource(path.join(OPENCLAW_HOME, "workspace", "skills"), "workspace:main");
 
   for (const agent of getConfiguredAgentWorkspaces()) {
-    if (!agent.workspace) continue;
-    addSource(path.join(agent.workspace, "skills"), `workspace:${agent.id}`);
+    addSource(agent.workspace ? path.join(agent.workspace, "skills") : undefined, `workspace:${agent.id}`);
+    addSource(agent.agentDir ? path.join(agent.agentDir, "skills") : undefined, `workspace:${agent.id}`);
   }
 
   return sources;
@@ -180,9 +184,12 @@ export function listOpenclawSkills(): { skills: SkillInfo[]; agents: Record<stri
     }
   }
 
-  const legacyCustomSkills = scanSkillsDir(path.join(OPENCLAW_HOME, "skills"), "custom");
+  const customSkills = scanSkillsDir(path.join(OPENCLAW_HOME, "skills"), "custom");
   const workspaceSkills = getWorkspaceSkillSources().flatMap(({ dir, source }) => scanSkillsDir(dir, source));
-  const allSkills = mergeSkillsByLocation([...builtinSkills, ...extSkills, ...legacyCustomSkills, ...workspaceSkills]);
+  const allSkills = mergeSkillsByLocation([...builtinSkills, ...extSkills, ...customSkills, ...workspaceSkills]);
+
+  let config: any = null;
+  try { config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf-8")); } catch { /* config unavailable */ }
 
   const agentSkills = getAgentSkillsFromSessions();
   for (const skill of allSkills) {
@@ -194,10 +201,9 @@ export function listOpenclawSkills(): { skills: SkillInfo[]; agents: Record<stri
     skill.usedBy = Array.from(new Set(skill.usedBy)).sort();
   }
 
-  const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf-8"));
-  const agentList = config.agents?.list || [];
+  const agentListForInfo = (config || {}).agents?.list || [];
   const agents: Record<string, SkillAgentInfo> = {};
-  for (const agent of agentList) {
+  for (const agent of agentListForInfo) {
     agents[agent.id] = {
       name: agent.identity?.name || agent.name || agent.id,
       emoji: agent.identity?.emoji || "🤖",
