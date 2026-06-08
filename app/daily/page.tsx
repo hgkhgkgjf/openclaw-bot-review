@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useI18n, localeToBcp47 } from '@/lib/i18n';
 
 interface DailyItem {
   time: string;
@@ -10,6 +11,7 @@ interface DailyItem {
 }
 
 function DailyBoard() {
+  const { t, locale } = useI18n();
   const [items, setItems] = useState<DailyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [speaking, setSpeaking] = useState(false);
@@ -33,14 +35,16 @@ function DailyBoard() {
 
   const completedItems = items.filter(i => i.status === 'completed');
   const inProgressItems = items.filter(i => i.status === 'in-progress');
-  
+
   const reportText = completedItems.length > 0
-    ? `今日共完成 ${completedItems.length} 项任务。${completedItems.map(i => i.content).join('。')}`
-    : '今日暂无完成记录';
+    ? t('daily.reportCompleted')
+        .replace('{count}', String(completedItems.length))
+        .replace('{items}', completedItems.map(i => i.content).join(locale === 'en' ? '. ' : '。'))
+    : t('daily.reportEmpty');
 
   const speak = () => {
     if (!('speechSynthesis' in window)) {
-      alert('您的浏览器不支持语音合成');
+      alert(t('daily.noSpeechSupport'));
       return;
     }
 
@@ -51,25 +55,18 @@ function DailyBoard() {
     }
 
     const u = new SpeechSynthesisUtterance(reportText);
-    u.lang = 'zh-CN';
+    u.lang = localeToBcp47(locale);
     u.rate = 1.0;
-    
+
     u.onstart = () => setSpeaking(true);
     u.onend = () => setSpeaking(false);
     u.onerror = () => setSpeaking(false);
-    
+
     setUtterance(u);
     window.speechSynthesis.speak(u);
   };
 
-  const stop = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    setSpeaking(false);
-  };
-
-  const today = new Date().toLocaleDateString('zh-CN', {
+  const today = new Date().toLocaleDateString(localeToBcp47(locale), {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -78,10 +75,9 @@ function DailyBoard() {
 
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-3xl mx-auto">
-      {/* 头部 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">📅 今日播报板</h1>
+          <h1 className="text-2xl font-bold">📅 {t('daily.title')}</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">{today}</p>
         </div>
         <div className="flex gap-2">
@@ -96,42 +92,40 @@ function DailyBoard() {
           >
             {speaking ? (
               <>
-                <span>⏹️</span> 停止
+                <span>⏹️</span> {t('daily.stop')}
               </>
             ) : (
               <>
-                <span>🎤</span> 播报
+                <span>🎤</span> {t('daily.report')}
               </>
             )}
           </button>
         </div>
       </div>
 
-      {/* 统计 */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-4 text-center">
           <div className="text-2xl font-bold text-green-400">{completedItems.length}</div>
-          <div className="text-xs text-[var(--text-muted)]">已完成</div>
+          <div className="text-xs text-[var(--text-muted)]">{t('daily.completed')}</div>
         </div>
         <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-4 text-center">
           <div className="text-2xl font-bold text-yellow-400">{inProgressItems.length}</div>
-          <div className="text-xs text-[var(--text-muted)]">进行中</div>
+          <div className="text-xs text-[var(--text-muted)]">{t('daily.inProgress')}</div>
         </div>
         <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-4 text-center">
           <div className="text-2xl font-bold text-gray-400">
             {items.length - completedItems.length - inProgressItems.length}
           </div>
-          <div className="text-xs text-[var(--text-muted)]">待开始</div>
+          <div className="text-xs text-[var(--text-muted)]">{t('daily.pending')}</div>
         </div>
       </div>
 
-      {/* 播报列表 */}
       <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-[var(--text-muted)]">加载中...</div>
+          <div className="p-8 text-center text-[var(--text-muted)]">{t('common.loading')}</div>
         ) : items.length === 0 ? (
           <div className="p-8 text-center text-[var(--text-muted)]">
-            今日暂无记录
+            {t('daily.noRecords')}
           </div>
         ) : (
           <div className="divide-y divide-[var(--border)]">
@@ -143,13 +137,13 @@ function DailyBoard() {
                 }`}
               >
                 <span className="text-lg mt-0.5">
-                  {item.status === 'completed' ? '✅' : 
+                  {item.status === 'completed' ? '✅' :
                    item.status === 'in-progress' ? '🔄' : '⏳'}
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm ${
-                    item.status === 'completed' 
-                      ? 'text-[var(--text-muted)] line-through' 
+                    item.status === 'completed'
+                      ? 'text-[var(--text-muted)] line-through'
                       : ''
                   }`}>
                     {item.content}
@@ -164,10 +158,9 @@ function DailyBoard() {
         )}
       </div>
 
-      {/* 提示 */}
       {speaking && (
         <div className="mt-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs text-blue-400">
-          🎤 正在语音播报今日完成事项...
+          🎤 {t('daily.speakingHint')}
         </div>
       )}
     </main>

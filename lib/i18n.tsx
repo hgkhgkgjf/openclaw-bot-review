@@ -13,6 +13,8 @@ const translations: Record<Locale, Record<string, string>> = {
     // nav sidebar
     "nav.overview": "總覽",
     "nav.agents": "機器人",
+    "nav.workspace": "Agent 工作台",
+    "nav.daily": "今日播報",
     "nav.models": "模型列表",
     "nav.monitor": "監控",
     "nav.sessions": "會話列表",
@@ -276,6 +278,45 @@ const translations: Record<Locale, Record<string, string>> = {
     "skills.contentTitle": "SKILL.md 內容",
     "skills.loadingContent": "正在載入技能內容...",
     "skills.contentLoadFailed": "技能內容載入失敗",
+    "skills.totalPrefix": "共",
+
+    // workspace page
+    "workspace.subtitle": "即時監控所有 Agent 狀態 · {time} 更新",
+    "workspace.online": "在線:",
+    "workspace.workingCount": "工作中:",
+    "workspace.agentStatus": "Agent 狀態",
+    "workspace.noAgents": "暫無 Agent 資料",
+    "workspace.installedSkills": "已安裝技能",
+    "workspace.totalSkills": "共 {count} 個技能",
+    "workspace.noSkills": "暫無技能",
+    "workspace.lastActive": "最後活躍:",
+    "workspace.noRecord": "無記錄",
+    "workspace.skillRunning": "執行中",
+    "workspace.skillDisabled": "已停用",
+    "workspace.unknown": "未知",
+
+    // daily report page
+    "daily.title": "今日播報板",
+    "daily.report": "播報",
+    "daily.stop": "停止",
+    "daily.completed": "已完成",
+    "daily.inProgress": "進行中",
+    "daily.pending": "待開始",
+    "daily.noRecords": "今日暫無記錄",
+    "daily.speakingHint": "正在語音播報今日完成事項...",
+    "daily.noSpeechSupport": "您的瀏覽器不支援語音合成",
+    "daily.reportCompleted": "今日共完成 {count} 項任務。{items}",
+    "daily.reportEmpty": "今日暫無完成記錄",
+
+    // theme
+    "theme.switchToLight": "切換到亮色模式",
+    "theme.switchToDark": "切換到暗色模式",
+
+    // copy
+    "common.copy": "複製",
+    "common.copied": "已複製",
+    "common.copyFailed": "複製失敗",
+    "common.unknownError": "未知錯誤",
 
     // gateway status
     "gateway.healthy": "Gateway 運作正常",
@@ -300,6 +341,18 @@ const translations: Record<Locale, Record<string, string>> = {
     "gateway.reloadNow": "立即重新整理",
     "gateway.reloadHint": "重新整理後，可點選機器人卡片上的「測試」確認是否正常運作",
     "gateway.configCorruptHint": "設定檔可能損毀，請使用上方 Gateway 面板還原備份",
+    "gateway.restart": "重啟",
+    "gateway.restartGateway": "🔄 重啟 Gateway",
+    "gateway.restarting": "⏳ 重啟中…",
+    "gateway.restartSent": "✅ 重啟指令已送出，稍後自動重新檢查…",
+    "gateway.restartFailed": "❌ 重啟失敗：{error}",
+    "gateway.viewAndRestart": "查看問題並重啟 Gateway",
+    "gateway.telegramStall": "Telegram 連線異常，建議重啟",
+    "gateway.statusTitle": "Gateway 狀態",
+    "gateway.processRunning": "✅ 運作中",
+    "gateway.processDown": "❌ 無回應",
+    "gateway.telegramPolling": "⚠️ Polling 異常",
+    "gateway.subagentTimeout": "⚠️ 有 timeout 記錄",
 
     // pixel office
     "pixelOffice.title": "OpenClaw Agents 辦公室",
@@ -621,6 +674,45 @@ const translations: Record<Locale, Record<string, string>> = {
     "skills.contentTitle": "SKILL.md 内容",
     "skills.loadingContent": "正在加载技能内容...",
     "skills.contentLoadFailed": "技能内容加载失败",
+    "skills.totalPrefix": "共",
+
+    // workspace page
+    "workspace.subtitle": "实时监控所有 Agent 状态 · {time} 更新",
+    "workspace.online": "在线:",
+    "workspace.workingCount": "工作中:",
+    "workspace.agentStatus": "Agent 状态",
+    "workspace.noAgents": "暂无 Agent 数据",
+    "workspace.installedSkills": "已安装技能",
+    "workspace.totalSkills": "共 {count} 个技能",
+    "workspace.noSkills": "暂无技能",
+    "workspace.lastActive": "最后活跃:",
+    "workspace.noRecord": "无记录",
+    "workspace.skillRunning": "运行中",
+    "workspace.skillDisabled": "已禁用",
+    "workspace.unknown": "未知",
+
+    // daily report page
+    "daily.title": "今日播报板",
+    "daily.report": "播报",
+    "daily.stop": "停止",
+    "daily.completed": "已完成",
+    "daily.inProgress": "进行中",
+    "daily.pending": "待开始",
+    "daily.noRecords": "今日暂无记录",
+    "daily.speakingHint": "正在语音播报今日完成事项...",
+    "daily.noSpeechSupport": "您的浏览器不支持语音合成",
+    "daily.reportCompleted": "今日共完成 {count} 项任务。{items}",
+    "daily.reportEmpty": "今日暂无完成记录",
+
+    // theme
+    "theme.switchToLight": "切换到亮色模式",
+    "theme.switchToDark": "切换到暗色模式",
+
+    // copy
+    "common.copy": "复制",
+    "common.copied": "已复制",
+    "common.copyFailed": "复制失败",
+    "common.unknownError": "未知错误",
 
     // gateway status
     "gateway.healthy": "Gateway 运行正常",
@@ -645,6 +737,18 @@ const translations: Record<Locale, Record<string, string>> = {
     "gateway.reloadNow": "立即刷新",
     "gateway.reloadHint": "刷新后，可点击机器人卡片上的「测试」确认是否正常运作",
     "gateway.configCorruptHint": "配置文件可能损坏，请使用上方 Gateway 面板还原备份",
+    "gateway.restart": "重启",
+    "gateway.restartGateway": "🔄 重启 Gateway",
+    "gateway.restarting": "⏳ 重启中…",
+    "gateway.restartSent": "✅ 重启指令已送出，稍后自动重新检查…",
+    "gateway.restartFailed": "❌ 重启失败：{error}",
+    "gateway.viewAndRestart": "查看问题并重启 Gateway",
+    "gateway.telegramStall": "Telegram 连接异常，建议重启",
+    "gateway.statusTitle": "Gateway 状态",
+    "gateway.processRunning": "✅ 运行中",
+    "gateway.processDown": "❌ 无响应",
+    "gateway.telegramPolling": "⚠️ Polling 异常",
+    "gateway.subagentTimeout": "⚠️ 有 timeout 记录",
 
     // pixel office
     "pixelOffice.title": "OpenClaw Agents办公室",
@@ -970,6 +1074,45 @@ const translations: Record<Locale, Record<string, string>> = {
     "skills.contentTitle": "SKILL.md",
     "skills.loadingContent": "Loading skill content...",
     "skills.contentLoadFailed": "Failed to load skill content",
+    "skills.totalPrefix": "Total",
+
+    // workspace page
+    "workspace.subtitle": "Real-time monitoring of all agent statuses · updated {time}",
+    "workspace.online": "Online:",
+    "workspace.workingCount": "Working:",
+    "workspace.agentStatus": "Agent Status",
+    "workspace.noAgents": "No agent data",
+    "workspace.installedSkills": "Installed Skills",
+    "workspace.totalSkills": "{count} skills total",
+    "workspace.noSkills": "No skills",
+    "workspace.lastActive": "Last active:",
+    "workspace.noRecord": "No record",
+    "workspace.skillRunning": "Running",
+    "workspace.skillDisabled": "Disabled",
+    "workspace.unknown": "Unknown",
+
+    // daily report page
+    "daily.title": "Daily Report Board",
+    "daily.report": "Report",
+    "daily.stop": "Stop",
+    "daily.completed": "Completed",
+    "daily.inProgress": "In Progress",
+    "daily.pending": "Pending",
+    "daily.noRecords": "No records today",
+    "daily.speakingHint": "Speaking today's completed items...",
+    "daily.noSpeechSupport": "Your browser does not support speech synthesis",
+    "daily.reportCompleted": "Completed {count} tasks today. {items}",
+    "daily.reportEmpty": "No completed records today",
+
+    // theme
+    "theme.switchToLight": "Switch to light mode",
+    "theme.switchToDark": "Switch to dark mode",
+
+    // copy
+    "common.copy": "Copy",
+    "common.copied": "Copied",
+    "common.copyFailed": "Copy failed",
+    "common.unknownError": "Unknown error",
 
     // gateway status
     "gateway.healthy": "Gateway is running",
@@ -994,6 +1137,18 @@ const translations: Record<Locale, Record<string, string>> = {
     "gateway.reloadNow": "Refresh now",
     "gateway.reloadHint": "After refresh, click the Test button on each bot card to verify it's working.",
     "gateway.configCorruptHint": "Config may be corrupt. Use the Gateway panel above to restore a backup.",
+    "gateway.restart": "Restart",
+    "gateway.restartGateway": "🔄 Restart Gateway",
+    "gateway.restarting": "⏳ Restarting…",
+    "gateway.restartSent": "✅ Restart command sent, rechecking shortly…",
+    "gateway.restartFailed": "❌ Restart failed: {error}",
+    "gateway.viewAndRestart": "View issues and restart Gateway",
+    "gateway.telegramStall": "Telegram connection issue, restart recommended",
+    "gateway.statusTitle": "Gateway Status",
+    "gateway.processRunning": "✅ Running",
+    "gateway.processDown": "❌ Not responding",
+    "gateway.telegramPolling": "⚠️ Polling issue",
+    "gateway.subagentTimeout": "⚠️ Timeout records",
 
     // pixel office
     "pixelOffice.title": "OpenClaw Agents Office",
@@ -1384,6 +1539,19 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
 export function useI18n() {
   return useContext(I18nContext);
+}
+
+export function localeToBcp47(locale: Locale): string {
+  switch (locale) {
+    case "en":
+      return "en-US";
+    case "zh-TW":
+      return "zh-TW";
+    case "vi":
+      return "vi-VN";
+    default:
+      return "zh-CN";
+  }
 }
 
 export function LanguageSwitcher() {

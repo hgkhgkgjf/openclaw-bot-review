@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
+import { useI18n } from "@/lib/i18n";
 
 export type Theme = "dark" | "light";
 
@@ -50,11 +51,12 @@ export function useTheme() {
 
 export function ThemeSwitcher() {
   const { theme, toggleTheme } = useTheme();
+  const { t } = useI18n();
   return (
     <button
       onClick={toggleTheme}
       className="px-2 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm hover:border-[var(--accent)] transition cursor-pointer"
-      title={theme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
+      title={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
     >
       {theme === "dark" ? "☀️" : "🌙"}
     </button>

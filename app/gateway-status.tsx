@@ -133,21 +133,21 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
       const res = await fetch("/api/gateway-restart", { method: "POST" });
       const data = await res.json();
       if (data.ok) {
-        setRestartMsg("✅ 重啟指令已送出，稍後自動重新檢查…");
+        setRestartMsg(t("gateway.restartSent"));
         setTimeout(() => {
           checkHealth();
           setRestartMsg(null);
           setShowDetail(false);
         }, 4000);
       } else {
-        setRestartMsg(`❌ 重啟失敗：${data.error || "未知錯誤"}`);
+        setRestartMsg(t("gateway.restartFailed").replace("{error}", data.error || t("common.unknownError")));
       }
     } catch (err: any) {
-      setRestartMsg(`❌ 重啟失敗：${err.message}`);
+      setRestartMsg(t("gateway.restartFailed").replace("{error}", err.message));
     } finally {
       setRestarting(false);
     }
-  }, [restarting, checkHealth]);
+  }, [restarting, checkHealth, t]);
 
   const handleRestore = useCallback(async (filename: string) => {
     if (restoring) return;
@@ -252,7 +252,7 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
       ) : showWarning ? (
         <span
           className={compact ? "text-yellow-400 text-xs cursor-pointer" : "text-yellow-400 text-sm cursor-pointer"}
-          title="Telegram 連線異常，建議重啟"
+          title={t("gateway.telegramStall")}
           onClick={handleDetailClick}
         >⚠️</span>
       ) : (
@@ -270,9 +270,9 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
           className={`inline-flex items-center gap-1 rounded-full border font-medium transition-colors ${
             compact ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"
           } bg-orange-500/20 text-orange-300 border-orange-500/40 hover:bg-orange-500/35 cursor-pointer`}
-          title="查看問題並重啟 Gateway"
+          title={t("gateway.viewAndRestart")}
         >
-          🔄{!compact && " 重啟"}
+          🔄{!compact && ` ${t("gateway.restart")}`}
         </button>
       )}
 
@@ -280,7 +280,7 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
       {showDetail && (
         <div className="absolute top-full left-0 mt-1 z-50 rounded-lg bg-[var(--card)] border border-[var(--border)] shadow-xl text-xs w-72 overflow-hidden">
           <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between">
-            <span className="font-semibold text-[var(--text)]">Gateway 狀態</span>
+            <span className="font-semibold text-[var(--text)]">{t("gateway.statusTitle")}</span>
             <button onClick={() => setShowDetail(false)} className="text-[var(--text-muted)] hover:text-[var(--text)] cursor-pointer">✕</button>
           </div>
 
@@ -289,7 +289,7 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
             <div className="flex items-center gap-2">
               <span className="text-[var(--text-muted)]">Process：</span>
               <span className={health?.ok ? "text-green-400" : "text-red-400"}>
-                {health?.ok ? "✅ 運作中" : "❌ 無回應"}
+                {health?.ok ? t("gateway.processRunning") : t("gateway.processDown")}
               </span>
             </div>
 
@@ -298,10 +298,10 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
               <div className="flex items-start gap-2">
                 <span className="text-[var(--text-muted)] shrink-0">Telegram：</span>
                 <span className="text-yellow-400">
-                  ⚠️ Polling 異常
+                  ⚠️ {t("gateway.telegramPolling")}
                   {logResult.lastStallAt && (
                     <span className="text-[var(--text-muted)] ml-1">
-                      ({new Date(logResult.lastStallAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })})
+                      ({new Date(logResult.lastStallAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })})
                     </span>
                   )}
                 </span>
@@ -312,7 +312,7 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
             {logResult && logResult.issues.includes("subagent_timeout") && (
               <div className="flex items-center gap-2">
                 <span className="text-[var(--text-muted)]">Subagent：</span>
-                <span className="text-orange-400">⚠️ 有 timeout 記錄</span>
+                <span className="text-orange-400">⚠️ {t("gateway.subagentTimeout")}</span>
               </div>
             )}
 
@@ -483,7 +483,7 @@ export function GatewayStatus({ compact = false, className = "", hideIconOnMobil
               disabled={restarting}
               className="w-full py-1.5 rounded-lg bg-orange-500/20 text-orange-300 border border-orange-500/40 hover:bg-orange-500/35 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer font-medium"
             >
-              {restarting ? "⏳ 重啟中…" : "🔄 重啟 Gateway"}
+              {restarting ? t("gateway.restarting") : t("gateway.restartGateway")}
             </button>
           </div>
         </div>

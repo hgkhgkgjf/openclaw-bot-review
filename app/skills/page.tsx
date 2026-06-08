@@ -268,7 +268,7 @@ export default function SkillsPage() {
         <div>
           <h1 className="text-2xl font-bold">{t("skills.title")}</h1>
           <p className="text-[var(--text-muted)] text-sm mt-1">
-            共 {skills.length} {t("skills.count")}（{t("skills.builtin")} {builtinCount} / {t("skills.extension")} {extensionCount} / {t("skills.custom")} {customCount} / {t("skills.workspace")} {workspaceCount}）
+            {t("skills.totalPrefix")} {skills.length} {t("skills.count")}（{t("skills.builtin")} {builtinCount} / {t("skills.extension")} {extensionCount} / {t("skills.custom")} {customCount} / {t("skills.workspace")} {workspaceCount}）
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">

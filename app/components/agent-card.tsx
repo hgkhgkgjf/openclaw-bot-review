@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { buildGatewayUrl } from "@/lib/gateway-url";
 import { getPlatformDisplayName } from "@/lib/platforms";
+import { useI18n } from "@/lib/i18n";
 
 export interface AgentPlatform {
   name: string;
@@ -102,6 +103,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 function ErrorStatusWithCopy({ error, className }: { error?: string; className?: string }) {
+  const { t } = useI18n();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const errorText = (error || "Unknown error").trim() || "Unknown error";
 
@@ -130,10 +132,10 @@ function ErrorStatusWithCopy({ error, className }: { error?: string; className?:
               onClick={onCopy}
               className="rounded border border-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[var(--accent)]"
             >
-              {copyState === "copied" ? "已复制" : "复制"}
+              {copyState === "copied" ? t("common.copied") : t("common.copy")}
             </button>
             {copyState === "failed" && (
-              <span className="text-[10px] text-amber-300">复制失败</span>
+              <span className="text-[10px] text-amber-300">{t("common.copyFailed")}</span>
             )}
           </span>
           <span className="whitespace-pre-wrap break-words">{errorText}</span>
