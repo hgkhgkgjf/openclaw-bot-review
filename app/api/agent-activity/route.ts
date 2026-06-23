@@ -29,6 +29,17 @@ function normalizeIdentityValue(rawValue: string): string | null {
   return value || null
 }
 
+function isEmojiLike(value: string): boolean {
+  return /\p{Extended_Pictographic}/u.test(value) || /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(value)
+}
+
+function normalizeIdentityEmoji(rawEmoji: unknown): string | null {
+  if (typeof rawEmoji !== 'string') return null
+  const emoji = normalizeIdentityValue(rawEmoji)
+  if (!emoji || !isEmojiLike(emoji)) return null
+  return emoji
+}
+
 type SessionsIndex = Record<string, { sessionId?: string; updatedAt?: number }>
 type CronStoreJob = {
   id: string
@@ -1015,7 +1026,7 @@ export async function GET() {
                   const emojiLine = identityRaw.split(/\r?\n/).find((line) => /\*\*Emoji:\*\*/.test(line))
                   const m = emojiLine?.match(/\*\*Emoji:\*\*\s*(.*)$/)
                   if (m) {
-                    const emoji = normalizeIdentityValue(m[1])
+                    const emoji = normalizeIdentityEmoji(m[1])
                     if (emoji) agentJsonEmoji = emoji
                   }
                 } catch { /* ignore */ }
@@ -1028,8 +1039,9 @@ export async function GET() {
                 try {
                   const raw = await fs.readFile(agentJsonPath, 'utf8')
                   const parsed = JSON.parse(raw)
-                  if (typeof parsed?.emoji === 'string' && parsed.emoji.trim()) {
-                    agentJsonEmoji = parsed.emoji.trim()
+                  const emoji = normalizeIdentityEmoji(parsed?.emoji)
+                  if (emoji) {
+                    agentJsonEmoji = emoji
                   }
                 } catch { /* ignore */ }
               }
@@ -1130,7 +1142,7 @@ export async function GET() {
           agents.push({
             agentId: agent.id,
             name: agent.name || agent.id,
-            emoji: agentJsonEmoji || agent.identity?.emoji || agent.emoji || '🤖',
+            emoji: agentJsonEmoji || normalizeIdentityEmoji(agent.identity?.emoji) || normalizeIdentityEmoji(agent.emoji) || '🤖',
             state,
             lastActive,
             subagents,

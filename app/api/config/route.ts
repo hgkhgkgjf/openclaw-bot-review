@@ -251,6 +251,17 @@ function normalizeIdentityName(rawName: string): string | null {
   return name || null;
 }
 
+function isEmojiLike(value: string): boolean {
+  return /\p{Extended_Pictographic}/u.test(value) || /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(value);
+}
+
+function normalizeIdentityEmoji(rawEmoji: unknown): string | null {
+  if (typeof rawEmoji !== "string") return null;
+  const emoji = normalizeIdentityName(rawEmoji);
+  if (!emoji || !isEmojiLike(emoji)) return null;
+  return emoji;
+}
+
 // 从 IDENTITY.md 读取机器人名字
 function readIdentityEmoji(agentId: string, agentDir?: string, workspace?: string): string | null {
   const candidates = [
@@ -267,7 +278,7 @@ function readIdentityEmoji(agentId: string, agentDir?: string, workspace?: strin
       const emojiLine = content.split(/\r?\n/).find((line) => /\*\*Emoji:\*\*/.test(line));
       const match = emojiLine?.match(/\*\*Emoji:\*\*\s*(.*)$/);
       if (match) {
-        const emoji = normalizeIdentityName(match[1]);
+        const emoji = normalizeIdentityEmoji(match[1]);
         if (emoji) return emoji;
       }
     } catch {}
@@ -400,7 +411,7 @@ export async function GET() {
       const identityName = readIdentityName(id, agent.agentDir, agent.workspace);
       const name = identityName || agent.name || id;
       const identityEmoji = readIdentityEmoji(id, agent.agentDir, agent.workspace);
-      const emoji = identityEmoji || agent.identity?.emoji || agent.emoji || "🤖";
+      const emoji = identityEmoji || normalizeIdentityEmoji(agent.identity?.emoji) || normalizeIdentityEmoji(agent.emoji) || "🤖";
       const model = normalizeModelRef(agent.model, defaultModel);
 
       // 查找绑定的平台
